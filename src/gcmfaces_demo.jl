@@ -2,19 +2,22 @@
 ## demo functions:
 
 """
-demo1(gridChoice)
+    demo1(gridChoice::String)
 
-Demonstrate basic fucntions (arithmetic, exchange, GCMGridLoad, gradient, etc.). Example call:
+Demonstrate basic functionalities (load grid, arithmetic, exchange, gradient,
+etc.). Call sequence:
 
 ```
-isdir("GRID_LLC90") ? (D,Dexch,Darr,DD)=demo1("LLC90") : nothing
+!isdir("GRID_LLC90") ? error("missing files") : nothing
+
+(D,Dexch,Darr,DD)=MeshArrays.demo1("LLC90");
 ```
 """
-function demo1(gridChoice)
+function demo1(gridChoice::String)
 
-    GCMGridSpec(gridChoice)
+    mygrid=GCMGridSpec(gridChoice)
 
-    D=read_bin(MeshArrays.grDir*"Depth.data",MeshArrays.ioPrec)
+    D=read_bin(mygrid.path*"Depth.data",mygrid.ioPrec,mygrid)
 
     1000+D
     D+1000
@@ -31,16 +34,16 @@ function demo1(gridChoice)
 
     Dexch=exchange(D,4)
     Darr=convert2array(D)
-    DD=convert2array(Darr)
+    DD=convert2array(Darr,mygrid)
 
-    GCMGridLoad()
+    GridVariables=GCMGridLoad(mygrid)
 
-    (dFLDdx, dFLDdy)=gradient(MeshArrays.YC)
+    (dFLDdx, dFLDdy)=gradient(GridVariables["YC"],GridVariables)
     (dFLDdxEx,dFLDdyEx)=exchange(dFLDdx,dFLDdy,4)
 
-    view(MeshArrays.hFacC,:,:,40)
-    #show(fsize(MeshArrays.hFacC,1))
-    #show(fsize(view(MeshArrays.hFacC,:,:,40),1))
+    view(GridVariables["hFacC"],:,:,40)
+    #show(fsize(GridVariables["hFacC"],1))
+    #show(fsize(view(GridVariables["hFacC"],:,:,40),1))
 
     return (D,Dexch,Darr,DD)
 
@@ -49,14 +52,12 @@ end
 ##
 
 """
-demo2()
+    demo2()
 
-Demonstrate higher level functions using smooth() and
+Demonstrate higher level functions using `smooth`. Call sequence:
 
 ```
-isdir("GRID_LLC90") ? demo1("LLC90") : GCMGridOnes("cs",6,100)
-(Rini,Rend,DXCsm,DYCsm)=demo2()
-@time Rend=smooth(Rini,DXCsm,DYCsm)
+(Rini,Rend,DXCsm,DYCsm)=MeshArrays.demo2();
 
 include(joinpath(dirname(pathof(MeshArrays)),"gcmfaces_plot.jl"))
 qwckplot(Rini)
@@ -67,60 +68,75 @@ qwckplot(Rend)
 function demo2()
 
     #Pre-requisite: either load predefined grid using `demo1` or call `GCMGridOnes`
+    isdir("GRID_LLC90") ? GridVariables=GCMGridLoad(GCMGridSpec("LLC90")) : GridVariables=GCMGridOnes("cs",6,100)
+
+    (Rini,Rend,DXCsm,DYCsm)=demo2(GridVariables)
+end
+
+function demo2(GridVariables::Dict)
+
+    mygrid=GridVariables["XC"].grid
 
     #initialize 2D field of random numbers
-    tmp1=convert2gcmfaces(MeshArrays.XC);
-    tmp1=randn(Float32,size(tmp1));
-    Rini=convert2gcmfaces(tmp1);
+    tmp1=convert2gcmfaces(GridVariables["XC"])
+    tmp1=randn(Float32,size(tmp1))
+    Rini=convert2gcmfaces(tmp1,mygrid)
 
     #apply land mask
-    if ndims(MeshArrays.hFacC.f[1])>2
-        tmp1=mask(view(MeshArrays.hFacC,:,:,1),NaN,0);
+    if ndims(GridVariables["hFacC"].f[1])>2
+        tmp1=mask(view(GridVariables["hFacC"],:,:,1),NaN,0)
     else
-        tmp1=mask(MeshArrays.hFacC,NaN,0);
+        tmp1=mask(GridVariables["hFacC"],NaN,0)
     end
     msk=fill(1.,tmp1) + 0. *tmp1;
     Rini=msk*Rini;
 
     #specify smoothing length scales in x, y directions
-    DXCsm=3*MeshArrays.DXC; DYCsm=3*MeshArrays.DYC;
+    DXCsm=3*GridVariables["DXC"]; DYCsm=3*GridVariables["DYC"];
 
     #apply smoother
-    Rend=smooth(Rini,DXCsm,DYCsm);
+    Rend=smooth(Rini,DXCsm,DYCsm,GridVariables);
 
     return (Rini,Rend,DXCsm,DYCsm)
 
 end
 
 """
-demo3()
+    demo3()
 
-Demonstrate computations of ocean meridional transports. Calling sequence:
+Demonstrate ocean transport computations. Call sequence:
 
 ```
 !isdir("GRID_LLC90")||!isdir("nctiles_climatology") ? error("missing files") : nothing
-
-GCMGridSpec("LLC90")
-GCMGridLoad()
-
 include(joinpath(dirname(pathof(MeshArrays)),"gcmfaces_nctiles.jl"))
-fileName="nctiles_climatology/UVELMASS/UVELMASS"
-U=read_nctiles(fileName,"UVELMASS");
-fileName="nctiles_climatology/VVELMASS/VVELMASS"
-V=read_nctiles(fileName,"VVELMASS");
 
-(UV, LC, Tr)=demo3(U,V);
+(UV,LC,Tr)=MeshArrays.demo3();
 
-using Statistics
+using Statistics, Plots
+plot(dropdims(mean(sum(Tr,dims=2),dims=3),dims=(2,3))/1e6,title="meridional transport")
+
 include(joinpath(dirname(pathof(MeshArrays)),"gcmfaces_plot.jl"))
 qwckplot(UV["U"][:,:,1,1],"U component (note varying face orientations)")
 qwckplot(UV["V"][:,:,1,1],"V component (note varying face orientations)")
-plot(dropdims(mean(sum(Tr,dims=2),dims=3),dims=(2,3))/1e6,title="meridional transport")
 ```
 """
-function demo3(U,V)
+function demo3()
 
-    LC=LatCircles(-89.0:89.0)
+    mygrid=GCMGridSpec("LLC90")
+    GridVariables=GCMGridLoad(mygrid)
+
+    fileName="nctiles_climatology/UVELMASS/UVELMASS"
+    U=Main.read_nctiles(fileName,"UVELMASS",mygrid);
+    fileName="nctiles_climatology/VVELMASS/VVELMASS"
+    V=Main.read_nctiles(fileName,"VVELMASS",mygrid);
+
+    (UV, LC, Tr)=demo3(U,V,GridVariables)
+
+end
+
+function demo3(U::gcmfaces,V::gcmfaces,GridVariables::Dict)
+
+    LC=LatCircles(-89.0:89.0,GridVariables)
 
     U=mask(U,0.0)
     V=mask(V,0.0)
@@ -130,7 +146,7 @@ function demo3(U,V)
     n=size(U)
     Tr=Array{Float64}(undef,length(LC),n[3],n[4])
     for i=1:length(LC)
-        Tr[i,:,:]=TransportThrough(UV,LC[i])
+        Tr[i,:,:]=TransportThrough(UV,LC[i],GridVariables)
     end
 
     return UV, LC, Tr

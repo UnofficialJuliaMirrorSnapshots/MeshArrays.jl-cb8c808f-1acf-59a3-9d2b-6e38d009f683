@@ -13,11 +13,10 @@ include("gcmfaces_IO.jl");
 include("gcmfaces_demo.jl");
 
 
-export AbstractGcmfaces, gcmfaces, gcmsubset, fsize, fijind
+export AbstractGcmfaces, gcmfaces, gcmsubset, gcmgrid, fsize, fijind
 export exchange, gradient, convergence, smooth, mask
 export GCMGridSpec, GCMGridLoad, GCMGridOnes
 export findtiles
-export demo1, demo2, demo3
 #The following functions rely on grid specs; currently via global vars.
 export read_bin, convert2array, convert2gcmfaces
 #The following exch_UV differs from normal exchange; incl. exch_UV_N.
