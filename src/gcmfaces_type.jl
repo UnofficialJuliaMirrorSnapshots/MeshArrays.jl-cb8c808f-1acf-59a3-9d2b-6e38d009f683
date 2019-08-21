@@ -2,30 +2,6 @@
 
 ## type definition
 
-abstract type AbstractGcmfaces{T, N} <: AbstractArray{T, N} end
-
-"""
-    gcmgrid
-
-gcmgrid data structure. Available constructors:
-
-```
-gcmgrid(path::String, class::String, nFaces::Int,
-        fSize::Array{NTuple{2, Int},1}, ioSize::Array{Int64,2},
-        ioPrec::Type, read::Function)
-```
-"""
-struct gcmgrid
-  path::String
-  class::String
-  nFaces::Int
-  fSize::Array{NTuple{2, Int},1}
-#  ioSize::NTuple{2, Int}
-  ioSize::Array{Int64,2}
-  ioPrec::Type
-  read::Function
-end
-
 """
     gcmfaces{T, N}
 
@@ -35,15 +11,14 @@ gcmfaces data structure. Available constructors:
 gcmfaces{T,N}(grid::gcmgrid,f::Array{Array{T,N},1},
          fSize::Array{NTuple{N, Int}}, aSize::NTuple{N,Int})
 gcmfaces(grid::gcmgrid,v1::Array{Array{T,N},1}) where {T,N}
-gcmfaces(A::AbstractGcmfaces{T, N}) where {T,N}
 
-gcmfaces(grid::gcmgrid,,::Type{T},
+gcmfaces(grid::gcmgrid,::Type{T},
          fSize::Array{NTuple{N, Int}}, aSize::NTuple{N,Int}) where {T,N}
 gcmfaces(grid::gcmgrid)
 gcmfaces()
 ```
 """
-struct gcmfaces{T, N} <: AbstractGcmfaces{T, N}
+struct gcmfaces{T, N} <: AbstractMeshArray{T, N}
    grid::gcmgrid
    f::Array{Array{T,N},1}
    fSize::Array{NTuple{N, Int}}
@@ -53,7 +28,7 @@ end
 """
     gcmsubset{T, N}
 
-gcmsubset data structure. Available constructors:
+gcmsubset data structure for subsets of gcmfaces. Available constructors:
 
 ```
 gcmsubset{T,N}(grid::gcmgrid,f::Array{Array{T,N},1},
@@ -63,7 +38,7 @@ gcmsubset(grid::gcmgrid,::Type{T},fSize::Array{NTuple{N, Int}},
           aSize::NTuple{N,Int},dims::NTuple{N,Int}) where {T,N}
 ```
 """
-struct gcmsubset{T, N} <: AbstractGcmfaces{T, N}
+struct gcmsubset{T, N} <: AbstractMeshArray{T, N}
    grid::gcmgrid
    f::Array{Array{T,N},1}
    fSize::Array{NTuple{N, Int}}
@@ -85,6 +60,28 @@ function gcmfaces(grid::gcmgrid,::Type{T},
   gcmfaces{T,N}(grid,f,fSize,aSize)
 end
 
+function gcmfaces(grid::gcmgrid,::Type{T}) where {T,N}
+  nFaces=grid.nFaces
+  fSize=grid.fSize
+  aSize=(prod(grid.ioSize),1)
+  gcmfaces(grid,T,fSize,aSize)
+end
+
+function gcmfaces(grid::gcmgrid,::Type{T},n3::Int) where {T,N}
+  nFaces=grid.nFaces
+  fSize=Array{NTuple{3, Int},1}(undef,nFaces)
+  for a=1:nFaces
+    fSize[a]=(grid.fSize[a][1],grid.fSize[a][2],n3)
+  end
+  aSize=(prod(grid.ioSize),1,n3)
+  gcmfaces(grid,T,fSize,aSize)
+end
+
+#other possibilities:
+#gcmfaces{T,N}(grid::gcmgrid)
+#gcmfaces(grid::gcmgrid,::Type{T}) where {T}
+#gcmfaces(grid::gcmgrid,::Type{T},n3::Int) where {T}
+
 function gcmfaces(grid::gcmgrid,
   v1::Array{Array{T,N},1}) where {T,N}
   fSize=fsize(v1)
@@ -92,13 +89,13 @@ function gcmfaces(grid::gcmgrid,
   gcmfaces{T,N}(grid,deepcopy(v1),fSize,aSize)
 end
 
-function gcmfaces(A::AbstractGcmfaces{T, N}) where {T,N}
-  #should this be called similar? deepcopy?
-  fSize=fsize(A)
-  aSize=size(A)
-  grid=A.grid
-  gcmfaces{T,N}(grid,deepcopy(A.f),fSize,aSize)
-end
+#should this be called similar? deepcopy?
+#function gcmfaces(A::AbstractMeshArray{T, N}) where {T,N}
+#  fSize=fsize(A)
+#  aSize=size(A)
+#  grid=A.grid
+#  gcmfaces{T,N}(grid,deepcopy(A.f),fSize,aSize)
+#end
 
 function gcmfaces(grid::gcmgrid)
   T=grid.ioPrec
@@ -111,7 +108,7 @@ function gcmfaces()
   T=Float64
   fSize=[(90, 270), (90, 270), (90, 90), (270, 90), (270, 90)]
   aSize=(105300, 1)
-  grid=gcmgrid("", "llc", 5, fSize, [90 1170], T, x -> missing)
+  grid=gcmgrid("", "llc", 5, fSize, [90 1170], T, read, write)
 
   gcmfaces(grid,T,fSize,aSize)
 end
@@ -143,6 +140,8 @@ end
     fijind(A::gcmfaces,ij::Int)
 
 Compute face and local indices (f,j,k) from global index (ij).
+
+(needed in other types?)
 """
 function fijind(A::gcmfaces,ij::Int)
   f=0
@@ -165,16 +164,17 @@ function fijind(A::gcmfaces,ij::Int)
 end
 
 """
-    fsize(A::AbstractGcmfaces{T, N}) where {T,N}
+    fsize(A::Union{gcmfaces{T, N},gcmsubset{T, N}}) where {T,N}
 
 Return vector of face array sizes. Other methods:
 ```
-fsize(A::AbstractGcmfaces{T, N},i::Int) where {T,N}
+fsize(A::Union{gcmfaces{T, N},gcmsubset{T, N}},i::Int) where {T,N}
 fsize(A::Array{Array{T,N},1}) where {T,N}
 fsize(A::Array{Array{T,N},1},i::Int) where {T,N}
 ```
 """
-function fsize(A::AbstractGcmfaces{T, N}) where {T,N}
+#deprecate documentation
+function fsize(A::Union{gcmfaces{T, N},gcmsubset{T, N}}) where {T,N}
   fs=Array{NTuple{N, Int}}(undef,A.grid.nFaces)
   for i=1:A.grid.nFaces
     fs[i]=size(A.f[i]);
@@ -182,7 +182,7 @@ function fsize(A::AbstractGcmfaces{T, N}) where {T,N}
   return fs
 end
 
-function fsize(A::AbstractGcmfaces{T, N},i::Int) where {T,N}
+function fsize(A::Union{gcmfaces{T, N},gcmsubset{T, N}},i::Int) where {T,N}
   if i>0
     fs=size(A.f[i])
   else
@@ -225,7 +225,7 @@ Base.size(A::gcmsubset, dim::Integer) = fsize(A.i, 0)[dim]
 
 #
 
-function Base.getindex(A::AbstractGcmfaces{T, N}, I::Vararg{Union{Int,AbstractUnitRange,Colon}, N}) where {T,N}
+function Base.getindex(A::Union{gcmfaces{T, N},gcmsubset{T, N}}, I::Vararg{Union{Int,AbstractUnitRange,Colon}, N}) where {T,N}
   if typeof(I[1])<:Int
     (f,i,j)=fijind(A,I[1])
     J=Base.tail(Base.tail(I))
@@ -264,7 +264,7 @@ end
 
 #
 
-function Base.setindex!(A::AbstractGcmfaces{T, N}, v, I::Vararg{Int, N}) where {T,N}
+function Base.setindex!(A::Union{gcmfaces{T, N},gcmsubset{T, N}}, v, I::Vararg{Int, N}) where {T,N}
   (f,i,j)=fijind(A,I[1])
   J=Base.tail(Base.tail(I))
   J=(i,j,J...)
@@ -278,7 +278,7 @@ end
 
 ## view
 
-function Base.view(a::AbstractGcmfaces{T, N}, I::Vararg{Union{Int,AbstractUnitRange,Colon}, N}) where {T,N}
+function Base.view(a::Union{gcmfaces{T, N},gcmsubset{T, N}}, I::Vararg{Union{Int,AbstractUnitRange,Colon}, N}) where {T,N}
   nFaces=a.grid.nFaces
   grTopo=a.grid.class
   if !isa(I[1],Colon)|!isa(I[2],Colon)
@@ -298,7 +298,7 @@ end
 
 # Custom pretty-printing
 
-function Base.show(io::IO, z::AbstractGcmfaces{T, N}) where {T,N}
+function Base.show(io::IO, z::Union{gcmfaces{T, N},gcmsubset{T, N}}) where {T,N}
 
 #    @printf io " MeshArrays instance with \n"
     if isa(z,gcmfaces)
@@ -561,4 +561,12 @@ function fill(val::Any,a::gcmfaces)
       c.f[iFace]=fill(val,fsize(a,iFace));
     end
     return c
+end
+
+###
+
+function nFacesEtc(a::gcmfaces)
+  nFaces=length(a.f)
+  ndims(a.f[1])>2 ? n3=size(a.f[1],3) : n3=1
+  return nFaces, n3
 end

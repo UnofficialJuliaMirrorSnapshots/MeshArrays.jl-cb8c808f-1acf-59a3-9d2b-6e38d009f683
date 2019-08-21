@@ -39,7 +39,7 @@ else;
     error("unknown gridName case");
 end;
 
-mygrid=gcmgrid(grDir,grTopo,nFaces,facesSize, ioSize, ioPrec, x -> missing)
+mygrid=gcmgrid(grDir,grTopo,nFaces,facesSize, ioSize, ioPrec, read, write)
 
 return mygrid
 
@@ -61,10 +61,11 @@ Based on the MITgcm naming convention, grid variables are:
 function GCMGridLoad(mygrid::gcmgrid)
 
     GridVariables=Dict()
+
     list0=("XC","XG","YC","YG","AngleCS","AngleSN","RAC","RAW","RAS","RAZ",
-    "DXC","DXG","DYC","DYG","hFacC","hFacS","hFacW","Depth")
+    "DXC","DXG","DYC","DYG","Depth")
     for ii=1:length(list0)
-        tmp1=read_bin(mygrid.path*list0[ii]*".data",mygrid.ioPrec,mygrid)
+        tmp1=mygrid.read(mygrid.path*list0[ii]*".data",MeshArray(mygrid,mygrid.ioPrec))
         tmp2=Symbol(list0[ii])
         @eval (($tmp2) = ($tmp1))
         GridVariables[list0[ii]]=tmp1
@@ -83,6 +84,15 @@ function GCMGridLoad(mygrid::gcmgrid)
         read!(fid,tmp1)
         tmp1 = hton.(tmp1)
 
+        tmp2=Symbol(list0[ii])
+        @eval (($tmp2) = ($tmp1))
+        GridVariables[list0[ii]]=tmp1
+    end
+
+    list0=("hFacC","hFacS","hFacW")
+    n3=length(GridVariables["RC"])
+    for ii=1:length(list0)
+        tmp1=mygrid.read(mygrid.path*list0[ii]*".data",MeshArray(mygrid,mygrid.ioPrec,n3))
         tmp2=Symbol(list0[ii])
         @eval (($tmp2) = ($tmp1))
         GridVariables[list0[ii]]=tmp1
@@ -107,13 +117,13 @@ function GCMGridOnes(grTp,nF,nP)
     facesSize[:].=[(nP,nP)]
     ioPrec=Float32
 
-    mygrid=gcmgrid(grDir,grTopo,nFaces,facesSize, ioSize, ioPrec, x -> missing)
+    mygrid=gcmgrid(grDir,grTopo,nFaces,facesSize, ioSize, ioPrec, read, write)
 
     GridVariables=Dict()
     list0=("XC","XG","YC","YG","RAC","RAZ","DXC","DXG","DYC","DYG","hFacC","hFacS","hFacW","Depth");
     for ii=1:length(list0);
         tmp1=fill(1.,nP,nP*nF);
-        tmp1=convert2gcmfaces(tmp1,mygrid);
+        tmp1=mygrid.read(tmp1,MeshArray(mygrid,Float64));
         tmp2=Symbol(list0[ii]);
         @eval (($tmp2) = ($tmp1))
         GridVariables[list0[ii]]=tmp1
@@ -127,7 +137,7 @@ end
 """
     findtiles(ni,nj,grid="llc90")
 
-Return a `gcmfaces` map of tile indices for tile size `ni,nj`
+Return a `MeshArray` map of tile indices for tile size `ni,nj`
 """
 function findtiles(ni::Int,nj::Int,grid="llc90")
     mytiles = Dict()

@@ -17,33 +17,44 @@ function demo1(gridChoice::String)
 
     mygrid=GCMGridSpec(gridChoice)
 
-    D=read_bin(mygrid.path*"Depth.data",mygrid.ioPrec,mygrid)
+    D=mygrid.read(mygrid.path*"Depth.data",MeshArray(mygrid,mygrid.ioPrec))
 
-    1000+D
-    D+1000
+    1000 .+ D
+    D .+ 1000
     D+D
-    D-1000
-    1000-D
+    D .- 1000
+    1000 .- D
     D-D
     1000*D
     D*1000
     D*D
     D/1000
-    1000/D
+    1000 ./ D
     D/D
 
     Dexch=exchange(D,4)
-    Darr=convert2array(D)
-    DD=convert2array(Darr,mygrid)
+    Darr=mygrid.write(D)
+    DD=mygrid.read(Darr,D)
+    DD .== D
 
     GridVariables=GCMGridLoad(mygrid)
 
     (dFLDdx, dFLDdy)=gradient(GridVariables["YC"],GridVariables)
     (dFLDdxEx,dFLDdyEx)=exchange(dFLDdx,dFLDdy,4)
 
-    view(GridVariables["hFacC"],:,:,40)
-    #show(fsize(GridVariables["hFacC"],1))
-    #show(fsize(view(GridVariables["hFacC"],:,:,40),1))
+    H=GridVariables["hFacC"]
+    Ha=mygrid.write(H)
+    Hb=mygrid.read(Ha,H)
+
+    println(typeof(H))
+    println(size(H))
+    println(H.fSize[1])
+    println(size(H.f[1]))
+    if ndims(H)==3&&size(H,3)>40
+        println(typeof(view(H,:,:,40)))
+    elseif ndims(H.f)==2&&size(H.f,2)>40
+        println(typeof(view(H,:,40)))
+    end
 
     return (D,Dexch,Darr,DD)
 
@@ -60,8 +71,8 @@ Demonstrate higher level functions using `smooth`. Call sequence:
 (Rini,Rend,DXCsm,DYCsm)=MeshArrays.demo2();
 
 include(joinpath(dirname(pathof(MeshArrays)),"gcmfaces_plot.jl"))
-qwckplot(Rini)
-qwckplot(Rend)
+qwckplot(Rini,"raw noise")
+qwckplot(Rend,"smoothed noise")
 ```
 
 """
@@ -78,13 +89,17 @@ function demo2(GridVariables::Dict)
     mygrid=GridVariables["XC"].grid
 
     #initialize 2D field of random numbers
-    tmp1=convert2gcmfaces(GridVariables["XC"])
-    tmp1=randn(Float32,size(tmp1))
-    Rini=convert2gcmfaces(tmp1,mygrid)
+    tmp1=randn(Float32,Tuple(mygrid.ioSize))
+    Rini=mygrid.read(tmp1,MeshArray(mygrid,Float32))
 
     #apply land mask
     if ndims(GridVariables["hFacC"].f[1])>2
         tmp1=mask(view(GridVariables["hFacC"],:,:,1),NaN,0)
+    elseif ndims(GridVariables["hFacC"].f)>1
+        #tmp1=mask(view(GridVariables["hFacC"],:,1),NaN,0)
+        tmp1=similar(Rini)
+        for i=1:length(tmp1.fIndex); tmp1[i]=GridVariables["hFacC"][i,1]; end;
+        tmp1=mask(tmp1,NaN,0)
     else
         tmp1=mask(GridVariables["hFacC"],NaN,0)
     end
@@ -120,17 +135,17 @@ function demo3()
     mygrid=GCMGridSpec("LLC90")
     GridVariables=GCMGridLoad(mygrid)
 
-    TrspX=read_bin(mygrid.path*"TrspX.bin",Float32,mygrid)
-    TrspY=read_bin(mygrid.path*"TrspY.bin",Float32,mygrid)
-    TauX=read_bin(mygrid.path*"TauX.bin",Float32,mygrid)
-    TauY=read_bin(mygrid.path*"TauY.bin",Float32,mygrid)
-    SSH=read_bin(mygrid.path*"SSH.bin",Float32,mygrid)
+    TrspX=mygrid.read(mygrid.path*"TrspX.bin",MeshArray(mygrid,Float32))
+    TrspY=mygrid.read(mygrid.path*"TrspY.bin",MeshArray(mygrid,Float32))
+    TauX=mygrid.read(mygrid.path*"TauX.bin",MeshArray(mygrid,Float32))
+    TauY=mygrid.read(mygrid.path*"TauY.bin",MeshArray(mygrid,Float32))
+    SSH=mygrid.read(mygrid.path*"SSH.bin",MeshArray(mygrid,Float32))
 
     (UV, LC, Tr)=demo3(TrspX,TrspY,GridVariables)
 
 end
 
-function demo3(U::gcmfaces,V::gcmfaces,GridVariables::Dict)
+function demo3(U::MeshArray,V::MeshArray,GridVariables::Dict)
 
     LC=LatitudeCircles(-89.0:89.0,GridVariables)
 
