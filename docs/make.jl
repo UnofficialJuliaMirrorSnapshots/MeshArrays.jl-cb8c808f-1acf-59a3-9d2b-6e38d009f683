@@ -4,7 +4,13 @@ using MeshArrays
 makedocs(
     sitename = "MeshArrays",
     format   = Documenter.HTML(),
-    modules  = [MeshArrays]
+    modules  = [MeshArrays],
+    pages = [
+    "Home" => "index.md",
+    "Main" => "main.md",
+    "Detail" => "detail.md",
+    "API" => "API.md",
+            ]
 )
 
 # Documenter can also automatically deploy documentation to gh-pages.

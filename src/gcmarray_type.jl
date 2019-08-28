@@ -7,11 +7,18 @@ gcmarray data structure. Available constructors:
 ```
 gcmarray{T,N}(grid::gcmgrid,f::Array{Array{T,N},1},
          fSize::Array{NTuple{N, Int}},fIndex::Array{Int,1})
-gcmarray(grid::gcmgrid,
-         fSize::Array{NTuple{N, Int}},fIndex::Array{Int,1})
 
+gcmarray(grid::gcmgrid,f::Array{Array{T,2},N}) where {T,N}
+gcmarray(grid::gcmgrid,f::Array{Array{T,N},1}) where {T,N}
+
+gcmarray(grid::gcmgrid,fSize::Array{NTuple{N, Int}},fIndex::Array{Int,1})
+gcmarray(<same as above>,n3::Int)
+gcmarray(<same as above>,n3::Int,n4::Int)
+
+gcmarray(grid::gcmgrid)
 gcmarray(grid::gcmgrid,::Type{T})
 gcmarray(grid::gcmgrid,::Type{T},n3::Int)
+gcmarray(grid::gcmgrid,::Type{T},n3::Int,n4::Int)
 ```
 """
 struct gcmarray{T, N} <: AbstractMeshArray{T, N}
@@ -21,11 +28,32 @@ struct gcmarray{T, N} <: AbstractMeshArray{T, N}
    fIndex::Array{Int,1}
 end
 
+function gcmarray(grid::gcmgrid,f::Array{Array{T,2},N}) where {T, N}
+  gcmarray{T,N}(grid,f,grid.fSize,collect(1:grid.nFaces))
+end
+
+function gcmarray(grid::gcmgrid,f::Array{Array{T,N},1}) where {T, N}
+  nFaces=grid.nFaces
+  if N>2
+    n3=size(f[1],3); n4=size(f[1],4);
+    g=Array{Array{T,2},3}(undef,nFaces,n3,n4)
+    for I in eachindex(view(g,1:nFaces,1:n3,1:n4))
+      g[I]=view(f[I[1]],:,:,I[2],I[3])
+    end
+    n4==1 ? g=dropdims(g,dims=3) : nothing
+    gcmarray{T,ndims(g)}(grid,g,grid.fSize,collect(1:nFaces))
+  else
+    gcmarray{T,1}(grid,f,grid.fSize,collect(1:nFaces))
+  end
+end
+
 function gcmarray(grid::gcmgrid,::Type{T},
-        fSize::Array{NTuple{2, Int}},
-        fIndex::Array{Int,1}) where {T}
+        fSize::Union{Array{NTuple{2, Int},1},NTuple{2, Int}},
+        fIndex::Union{Array{Int,1},Int}) where {T}
   nFaces=length(fIndex)
   f=Array{Array{T,2},1}(undef,nFaces)
+  isa(fSize,NTuple) ? fSize=[fSize] : nothing
+  isa(fIndex,Int) ? fIndex=[fIndex] : nothing
   for a=1:nFaces
     f[a]=Array{T}(undef,fSize[a])
   end
@@ -33,17 +61,40 @@ function gcmarray(grid::gcmgrid,::Type{T},
 end
 
 function gcmarray(grid::gcmgrid,::Type{T},
-        fSize::Array{NTuple{2, Int}},
-        fIndex::Array{Int,1},n3::Int) where {T}
+        fSize::Union{Array{NTuple{2, Int},1},NTuple{2, Int}},
+        fIndex::Union{Array{Int,1},Int},n3::Int) where {T}
   nFaces=length(fIndex)
   f=Array{Array{T,2},2}(undef,nFaces,n3)
+  isa(fSize,NTuple) ? fSize=[fSize] : nothing
+  isa(fIndex,Int) ? fIndex=[fIndex] : nothing
   for a=1:nFaces; for i3=1:n3;
     f[a,i3]=Array{T}(undef,fSize[a]...)
   end; end;
   gcmarray{T,2}(grid,f,fSize,fIndex)
 end
 
+function gcmarray(grid::gcmgrid,::Type{T},
+        fSize::Union{Array{NTuple{2, Int},1},NTuple{2, Int}},
+        fIndex::Union{Array{Int,1},Int},n3::Int,n4::Int) where {T}
+  nFaces=length(fIndex)
+  f=Array{Array{T,2},3}(undef,nFaces,n3,n4)
+  isa(fSize,NTuple) ? fSize=[fSize] : nothing
+  isa(fIndex,Int) ? fIndex=[fIndex] : nothing
+  for a=1:nFaces; for i4=1:n4; for i3=1:n3;
+    f[a,i3,i4]=Array{T}(undef,fSize[a]...)
+  end; end; end;
+  gcmarray{T,3}(grid,f,fSize,fIndex)
+end
+
 # +
+function gcmarray(grid::gcmgrid)
+  nFaces=grid.nFaces
+  fSize=grid.fSize
+  fIndex=collect(1:grid.nFaces)
+  T=grid.ioPrec
+  gcmarray(grid,T,fSize,fIndex)
+end
+
 function gcmarray(grid::gcmgrid,::Type{T}) where {T}
   nFaces=grid.nFaces
   fSize=grid.fSize
@@ -56,6 +107,13 @@ function gcmarray(grid::gcmgrid,::Type{T},n3::Int) where {T}
   fSize=grid.fSize
   fIndex=collect(1:grid.nFaces)
   gcmarray(grid,T,fSize,fIndex,n3)
+end
+
+function gcmarray(grid::gcmgrid,::Type{T},n3::Int,n4::Int) where {T}
+  nFaces=grid.nFaces
+  fSize=grid.fSize
+  fIndex=collect(1:grid.nFaces)
+  gcmarray(grid,T,fSize,fIndex,n3,n4)
 end
 
 # -
@@ -91,7 +149,18 @@ function Base.setindex!(A::gcmarray{T, N}, v, I::Vararg{Int, N}) where {T,N}
 end
 
 function Base.view(A::gcmarray{T, N}, I::Vararg{Union{Int,AbstractUnitRange,Colon}, N}) where {T,N}
-  return view(A.f,I...)
+  J=1:length(A.fIndex)
+  !isa(I[1],Colon) ? J=J[I[1]] : nothing
+  nFaces=length(J)
+
+  tmpf=view(A.f,I...)
+  n3=Int(length(tmpf)/nFaces) #length(tmpf)>nFaces ? n3=Int(length(tmpf)/nFaces) : n3=1
+
+  K=(A.grid,eltype(A),A.fSize[J],A.fIndex[J])
+  n3>1 ? tmp=gcmarray(K...,n3) : tmp=gcmarray(K...)
+  for I in eachindex(tmpf); tmp.f[I] = view(tmpf[I],:,:); end
+
+  return tmp
 end
 
 # ### Custom pretty-printing, similar, and broadcast
@@ -268,7 +337,8 @@ Return nFaces, n3 (1 in 2D case; >1 otherwise)
 function nFacesEtc(a::gcmarray)
   nFaces=length(a.fIndex)
   ndims(a.f)>1 ? n3=size(a.f,2) : n3=1
-  return nFaces, n3
+  ndims(a.f)>2 ? n4=size(a.f,3) : n4=1
+  return nFaces, n3, n4
 end
 
 """
